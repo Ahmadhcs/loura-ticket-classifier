@@ -95,6 +95,24 @@ Trade off: Exact comparison means a resend with a trailing space gets a 409. Cur
 
 ---
 
+### Retries and how a ticket ends up failed
+What: Each ticket gets 3 attempts total. Every model call has a 10 second timeout. Between attempts the worker waits with exponential backoff plus some jitter, roughly 1s then 2s, and doesn't wait after the last attempt. Timeouts, provider errors, and invalid output (bad JSON, missing fields, values outside the allowed sets) all count as a failed attempt and share the same budget. After the third failed attempt the ticket is marked failed, with the reason from the last attempt stored on it. If a ticket comes back from lease recovery already out of attempts, it's marked failed straight away without calling the model. If the worker loses its lease mid way, it stops and writes nothing.
+
+Why: Model failures are usually one offs, so a couple of retries recover most of them cheaply. Backoff avoids hammering a provider that's already struggling, and the jitter keeps retries from all firing at the same moment. Failing loudly beats coercing a bad answer into a default, a failed ticket with a reason is visible and fixable, a coerced one looks like a real classification and nobody would ever know the model went wrong.
+
+Trade off: Retrying invalid output with the same prompt might just reproduce the same mistake, with a real model I'd include the validation error in the retry prompt. A ticket waiting in backoff still holds one of the concurrency slots. Worst case per ticket is about 33 seconds (3 * 10s + backoff), which is why the lease is 60 seconds. Rate limit responses from a real provider usually say how long to wait, and I don't honor that, it just counts as a normal failed attempt. Failed tickets stay failed until something requeues them.
+
+---
+
+### Concurrency
+What: There is one worker running inside the same process as the API, and it classifies at most 4 tickets at a time (can be adjusted). Every tick it fills any free slots by claiming the oldest pending tickets, and when a classification finishes its slot frees up and gets refilled on the next tick. Everything else just waits in the db as pending. If more than one instance were running, the atomic claim makes sure no two workers ever get the same ticket, the cap controls how many, the claim controls who gets which.
+
+Why: Classifying is mostly waiting on the model, so running a few at once gives real throughput even in a single node process. Capping it protects the model provider, real APIs rate limit you and every call costs money, and unlimited parallel calls would just turn into rate limit errors and more retries. It also means a sudden burst of tickets sits safely in the db instead of all hitting the model at once. 4 is a reasonable start, not a measured number, with a real provider I'd set it based on their rate limit.
+
+Trade off: The cap is per process, so 3 instances would mean up to 12 calls at once. A real global limit would need shared coordination, which is out of scope here. A ticket waiting in retry backoff still holds a slot, so a run of failures slows everything else down a bit.
+
+---
+
 ## The LLM
 
 

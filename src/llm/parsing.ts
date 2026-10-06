@@ -56,7 +56,7 @@ export function extractJson(raw: string): string | null {
     return null;
 }
 
-function truncate(text: string): string {
+export function truncate(text: string): string {
     return text.length > 50 ? `${text.slice(0, 50)}…` : text;
 }
 
