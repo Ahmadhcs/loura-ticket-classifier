@@ -78,6 +78,13 @@ Trade off: Strictness turns some recoverable answers into retries. Taking the fi
 
 ---
 
+### In-flight work on restart
+What: Claiming a ticket sets it to processing, with a lease time of 60 seconds. On startup and every worker tick (500ms), tickets in processing whose lease ended go back to pending, keeping their attempt count. Attemps are counted before each model call, so the crash can't reset the retry budget. Every write after the claim only succeeds if the worker still holds the exact lease it claimed with, the lease value is acting as a fencing token. 
+
+Why: Tickets live in the db instead of the memory, this way the crash cant lose them. It can only leave them stranded in the processing stage, and the lease is their way of unstranding them without a need for a manual cleanup. Keeping attempts means a ticket the constantly fails the worker will still end up as failed instead of being stuck in retrying forever. 
+
+Trade off: Processing is at-least-once, not exactly-once. A crash after the model responds but before the result is saved means that ticket is classified again, an extra model call. Stranded tickets wait up to 60 seconds for their lease to expire before resuming. The lease must stay longer than the worst case time for all retries, or a healthy ticket gets reclaimed in the middle of retry.
+
 ### API shape
 What: See the API section above. POST returns 202 for a new ticket and 200 for a repeat, reusing an id with different content returns 409. "Same content" means subject and body match exactly, with no normalisation. Every error uses one format. Listing uses cursor pagination, newest first.
 

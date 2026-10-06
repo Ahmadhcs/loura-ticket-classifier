@@ -23,6 +23,9 @@ CREATE TABLE IF NOT EXISTS tickets (
 
 CREATE INDEX IF NOT EXISTS idx_tickets_filters
   ON tickets (category, priority, created_at, id);
+
+CREATE INDEX IF NOT EXISTS idx_tickets_status
+  ON tickets (status, created_at, id);
 `;
 
 
