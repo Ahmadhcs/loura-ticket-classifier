@@ -74,7 +74,6 @@ Why: A repair that changes meaning turns a model error into data that looks corr
 
 Trade off: Strictness turns some recoverable answers into retries. Taking the first JSON object could pick the wrong one if the model returns several. Most importantly, validation checks shape, not truth: a well formed but wrong classification, including one produced by prompt injection, passes. Catching that needs an evaluation set, not a schema.
 
-### Prompt injection _(planned)_
 
 ---
 
@@ -111,11 +110,31 @@ Why: Classifying is mostly waiting on the model, so running a few at once gives 
 
 Trade off: The cap is per process, so 3 instances would mean up to 12 calls at once. A real global limit would need shared coordination, which is out of scope here. A ticket waiting in retry backoff still holds a slot, so a run of failures slows everything else down a bit.
 
+--- 
+
+### Prompt injection
+What: Ticket content comes from the public, so it's treated as untrusted from start to finish. In the prompt, the subject and body are wrapped in <ticket> delimiters, with an explicit instruction that everything inside is customer data and must never be followed as instructions. Any attempt to close the delimiter from inside a ticket (</ticket>, including variants with spaces) is neutralised so a ticket cant break out of its block. On the output side, the schema only allows the fixed category and priority values and caps the summary at 200 characters, so even a successful injection can only pick from valid options and can't plant a long message. At ingest, a simple pattern check looks for instruction like text ("ignore previous instructions", "classify it as", etc.) and sets suspected_injection on the ticket. Flagged tickets still get classified, but they can be found with ?suspected_injection=true for a human to review. t-1005 gets flagged, and none of the other sample tickets do.
+
+Why: An LLM has no hard wall between my instructions and a stranger's text, it's all just text to the model, so injection can be reduced but not fully prevented. Instead of pretending otherwise, I went with layers: make the attack less likely to work (delimiters), limit the damage when it does (fixed values, short summary), and make it visible (the flag). To show the limitation honestly, the fake model has an obeyInjection mode that falls for t-1005, and a test proves the attacker's answer (technical, high, "Approved for immediate refund") passes validation and gets stored, but the ticket is flagged.
+
+Trade off: Delimiters only reduce the risk. The pattern check is crude: rephrasing, another language, or creative wording gets past it, and it could flag an honest ticket that happens to quote similar text. Flagged tickets are still classified automatically, so their category and priority may be attacker chosen within the allowed values. The summary is still model written free text, so anything downstream should treat it as untrusted and never act on it automatically (like approving a refund because a summary says so). A stronger setup would use a second check on the model's output or route flagged tickets to human review before their classification is trusted.
+
 ---
 
-## The LLM
+### The LLM
 
+There's no real model here, the brief said a convincing fake is fine, so everything goes through an LLMClient interface with a single method: complete(prompt, signal), which takes the prompt and returns raw text. The rest of the code only knows about that interface, so the fake and a real provider are interchangeable.
 
+The prompt lives in src/llm/prompt.ts (PROMPT_VERSION v1): instructions, the allowed values, one worked example, and the ticket wrapped in <ticket> delimiters (see Prompt injection).
+
+FakeLLM (src/llm/fake.ts) has two modes:
+
+- Generated (what the app runs): it reads the ticket back out of the prompt, the same text a real model would see, and picks a category and priority with simple whole-word keyword rules, plus a one-sentence summary from the subject (or the body when the subject is empty, like t-1008). It's deliberately simple and makes realistic mistakes, t-1009 is mostly about an empty export but mentions being overcharged, so it comes out as billing.
+- Scripted (for tests): plays back a fixed list of responses, errors, or hangs in order, so each test controls exactly what the "model" says.
+
+To exercise the model boundary, generated mode misbehaves on purpose. With probability FAKE_LLM_FAILURE_RATE (default 0.2) it returns one of six real failures: broken JSON, an out-of-set value (priority "urgent"), a missing field, an extra field, a thrown provider error, or a hang that never responds until the timeout aborts it. Separately, about 30% of valid answers come back wrapped in prose or code fences, which isn't a failure, just messy formatting the parser has to handle. All randomness comes from a seeded RNG (FAKE_LLM_SEED), so runs are reproducible. There's also an obeyInjection option that simulates a model falling for t-1005.
+
+Plugging in a real provider means writing one class that implements LLMClient: send the prompt with the provider's SDK, pass the AbortSignal through so timeouts work, and return the text. With a real provider I'd use its structured output mode, but I'd keep my own validation anyway, since a perfectly formatted answer can still be wrong. No API keys are needed to run this, and none are committed.
 
 ---
 
