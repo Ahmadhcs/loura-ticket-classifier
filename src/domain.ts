@@ -33,3 +33,5 @@ export interface TicketBase extends NewTicket {
 export type Ticket = | (TicketBase & { status: "pending" | "processing" })
 | (TicketBase & { status: "classified"; classification: Classification })
 | (TicketBase & { status: "failed"; error: string });
+
+export type Result<T, E> = { ok: true; value: T } | { ok: false; error: E };
