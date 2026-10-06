@@ -1,7 +1,7 @@
 import { beforeEach, expect, it } from "vitest";
-import { openDB, type Db } from "../src/repository/db";
+import { openDB, type DB } from "../src/repository/db.js";
 
-let db: Db;
+let db: DB;
 beforeEach(() => {
   db = openDB(":memory:");
 });
