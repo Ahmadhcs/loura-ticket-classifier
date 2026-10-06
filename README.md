@@ -7,7 +7,10 @@ A small HTTP service that ingests support tickets, classifies them asynchronousl
 Running the project: 
 
 ```bash
-filling later
+npm install
+npm run dev        # API on http://localhost:3000
+npm run seed       # in a second terminal: loads the 10 sample tickets
+npm test
 ```
 
 ---
@@ -31,11 +34,15 @@ processing (lease expires) -> pending
 
 ## API
 
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/tickets` | Ingest a ticket. `202` if new, `200` if the id already exists. |
-| `GET` | `/tickets/:id` | Fetch one ticket. `404` if missing. |
-| `GET` | `/tickets?category=&priority=&limit=&cursor=` | List with filters and cursor pagination. |
+| Method | Path | Success | Errors |
+|---|---|---|---|
+| `POST` | `/tickets` | `202` new ticket, `200` same id + same content already exists | `400` invalid body, `409` same id with different content, `413` body too large |
+| `GET` | `/tickets/:id` | `200` | `404` |
+| `GET` | `/tickets?category=&priority=&limit=&cursor=` | `200` `{ items, nextCursor }` | `400` invalid filter or cursor |
+
+- Input: id 1–100 chars, subject 0–500 chars, body 1–20,000 chars. Unknown fields are rejected.
+- Errors always look like `{ "error": { "code": "...", "message": "..." } }`. Codes include `invalid_request`, `invalid_json`, `invalid_cursor`, `not_found`, `conflict`.
+- Listing is newest first. `limit` defaults to 20 (max 100). `nextCursor` is an opaque token, `null` on the last page.
 
 
 ## Decisions on the open questions
@@ -69,7 +76,15 @@ Trade off: Strictness turns some recoverable answers into retries. Taking the fi
 
 ### Prompt injection _(planned)_
 
+---
+
 ### API shape
+What: See the API section above. POST returns 202 for a new ticket and 200 for a repeat, reusing an id with different content returns 409. "Same content" means subject and body match exactly, with no normalisation. Every error uses one format. Listing uses cursor pagination, newest first.
+
+Why: 202 says honestly that the work isn't done yet, and differs from 200 so a client can tell "new" from "already had it". Re-sending identical content is a normal client retry; re-using an id with different content is likely a client bug, so it's surfaced instead of silently ignored. Cursor pagination stays correct while new tickets keep arriving; offset pagination would repeat or skip rows when the list shifts.
+
+Trade off: Exact comparison means a resend with a trailing space gets a 409. Cursors can't jump to page n and there's no total count. List filters are built dynamically from fixed SQL fragments, always with bound parameters, so each filter combination can use the (category, priority, created_at, id) index, priority only and unfiltered listings dont use it and scan the table. No authentication and no API versioning.
+
 
 ---
 
