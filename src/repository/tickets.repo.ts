@@ -12,6 +12,7 @@ export interface TicketRow {
     summary: string | null;
     error: string | null;
     attempts: number;
+    suspected_injection: number;
     lease_until: number | null;
     created_at: number;
     updated_at: number;
@@ -20,6 +21,7 @@ export interface TicketRow {
 export interface ListFilters {
     category?: Category;
     priority?: Priority;
+    suspectedInjection?: boolean;
 }
 
 export interface Keyset {
@@ -78,15 +80,23 @@ export class TicketsRepo {
             WHERE status = 'processing' AND lease_until < @now
         `);
         this.insertStmt = db.prepare(`
-            INSERT INTO tickets (id, subject, body, status, attempts, created_at, updated_at)
-            VALUES (@id, @subject, @body, 'pending', 0, @now, @now)
+            INSERT INTO tickets (id, subject, body, status, attempts, suspected_injection, created_at, updated_at)
+            VALUES (@id, @subject, @body, 'pending', 0, @suspectedInjection, @now, @now)
             ON CONFLICT(id) DO NOTHING
         `);
         this.selectByIdStmt = db.prepare('SELECT * FROM tickets WHERE id = ?');
     }
 
-    insertIfAbsent(input: NewTicket, now: number): { ticket: Ticket; created: boolean } {
-        const info = this.insertStmt.run({ ...input, now });
+    insertIfAbsent(
+        input: NewTicket,
+        now: number,
+        suspectedInjection = false,
+    ): { ticket: Ticket; created: boolean } {
+        const info = this.insertStmt.run({
+            ...input,
+            now,
+            suspectedInjection: suspectedInjection ? 1 : 0,
+        });
         const ticket = this.findById(input.id);
         if (!ticket) {
             throw new Error(`ticket ${input.id} not found after insert`);
@@ -110,6 +120,9 @@ export class TicketsRepo {
         if (filters.priority !== undefined) {
             where.push('priority = @priority');
             params.priority = filters.priority;
+        }
+        if (filters.suspectedInjection === true) {
+            where.push('suspected_injection = 1');
         }
         if (after !== undefined) {
             where.push(
@@ -168,6 +181,7 @@ export class TicketsRepo {
             subject: row.subject,
             body: row.body,
             attempts: row.attempts,
+            suspectedInjection: row.suspected_injection === 1,
             createdAt: new Date(row.created_at).toISOString(),
             updatedAt: new Date(row.updated_at).toISOString(),
         };

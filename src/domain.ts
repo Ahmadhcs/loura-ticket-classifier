@@ -24,9 +24,10 @@ export interface NewTicket {
 
 /** Required fields for all tickets regardless of their status */
 export interface TicketBase extends NewTicket {
-    attempts: number; 
+    attempts: number;
+    suspectedInjection: boolean;
     createdAt: string;
-    updatedAt: string; 
+    updatedAt: string;
 }
 
 /** The ticket's fields depend on their status  */

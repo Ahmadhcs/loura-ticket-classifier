@@ -3,6 +3,7 @@ import type { NewTicket, Ticket } from '../domain.js';
 import type { Keyset, TicketsRepo } from '../repository/tickets.repo.js';
 import { ConflictError, InvalidCursorError, NotFoundError } from '../api/errors.js';
 import type { ListTicketsQuery } from '../api/schemas.js';
+import { detectSuspectedInjection } from './injection.js';
 
 const Cursor = z
     .object({
@@ -31,7 +32,8 @@ export class TicketsService {
     ) {}
 
     ingest(input: NewTicket): { ticket: Ticket; created: boolean } {
-        const { ticket, created } = this.repo.insertIfAbsent(input, this.clock());
+        const suspected = detectSuspectedInjection(input.subject, input.body);
+        const { ticket, created } = this.repo.insertIfAbsent(input, this.clock(), suspected);
         if (!created && (ticket.subject !== input.subject || ticket.body !== input.body)) {
             throw new ConflictError(`ticket ${input.id} already exists with different content`);
         }
@@ -49,7 +51,11 @@ export class TicketsService {
     list(query: ListTicketsQuery): { items: Ticket[]; nextCursor: string | null } {
         const after = query.cursor === undefined ? undefined : decodeCursor(query.cursor);
         const rows = this.repo.list(
-            { category: query.category, priority: query.priority },
+            {
+                category: query.category,
+                priority: query.priority,
+                suspectedInjection: query.suspected_injection === undefined ? undefined : true,
+            },
             query.limit + 1,
             after,
         );

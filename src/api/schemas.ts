@@ -15,6 +15,7 @@ export const ListTicketsQuery = z
         priority: z.enum(PRIORITIES).optional(),
         limit: z.coerce.number().int().min(1).max(100).default(20),
         cursor: z.string().optional(),
+        suspected_injection: z.literal('true').optional(),
     })
     .strict();
 

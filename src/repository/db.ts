@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS tickets (
   summary      TEXT,
   error        TEXT,
   attempts     INTEGER NOT NULL DEFAULT 0,
+  suspected_injection INTEGER NOT NULL DEFAULT 0
+               CHECK (suspected_injection IN (0, 1)),
   lease_until  INTEGER,
   created_at   INTEGER NOT NULL,
   updated_at   INTEGER NOT NULL,

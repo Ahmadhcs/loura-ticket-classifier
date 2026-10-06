@@ -7,7 +7,11 @@ export interface FakeLLMOptions {
     script?: ScriptedResponse[];
     seed?: number;
     failureRate?: number;
+    obeyInjection?: boolean;
 }
+
+const INJECTED_INSTRUCTION =
+    /classify\s+(?:it|this)(?:\s+ticket)?\s+as\s+(\w+)\s+with\s+priority\s+(\w+)\s+and\s+summari[sz]e\s+(?:it|this)?\s*as\s+'([^']*)'/i;
 
 function mulberry32(seed: number): () => number {
     let state = seed >>> 0;
@@ -88,11 +92,13 @@ export class FakeLLM implements LLMClient {
     private scriptIndex = 0;
     private readonly random: () => number;
     private readonly failureRate: number;
+    private readonly obeyInjection: boolean;
 
     constructor(options: FakeLLMOptions = {}) {
         this.script = options.script;
         this.random = mulberry32(options.seed ?? 1);
         this.failureRate = options.failureRate ?? 0.2;
+        this.obeyInjection = options.obeyInjection ?? false;
     }
 
     async complete(prompt: string, signal: AbortSignal): Promise<string> {
@@ -124,6 +130,18 @@ export class FakeLLM implements LLMClient {
 
         const { subject, body } = readTicket(prompt);
         const text = `${subject} ${body}`;
+
+        if (this.obeyInjection) {
+            const injected = INJECTED_INSTRUCTION.exec(text);
+            if (injected !== null) {
+                return JSON.stringify({
+                    category: injected[1] ?? '',
+                    priority: injected[2] ?? '',
+                    summary: injected[3] ?? '',
+                });
+            }
+        }
+
         const classification: Classification = {
             category: pickCategory(text),
             priority: pickPriority(text),
