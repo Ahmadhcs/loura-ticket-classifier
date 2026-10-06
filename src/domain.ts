@@ -12,7 +12,7 @@ export type TicketStatus = (typeof TICKET_STATUSES)[number];
 export interface Classification {
     category: Category;
     priority: Priority;
-    status: TicketStatus;
+    summary: string;
 }
 
 /** What the client submits */
