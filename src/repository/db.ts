@@ -20,6 +20,9 @@ CREATE TABLE IF NOT EXISTS tickets (
   CHECK (status != 'classified'
          OR (category IS NOT NULL AND priority IS NOT NULL AND summary IS NOT NULL))
 );
+
+CREATE INDEX IF NOT EXISTS idx_tickets_filters
+  ON tickets (category, priority, created_at, id);
 `;
 
 

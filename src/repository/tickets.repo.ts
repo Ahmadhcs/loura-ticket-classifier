@@ -17,11 +17,23 @@ export interface TicketRow {
     updated_at: number;
 }
 
+export interface ListFilters {
+    category?: Category;
+    priority?: Priority;
+}
+
+export interface Keyset {
+    createdAt: number;
+    id: string;
+}
+
 export class TicketsRepo {
+    private readonly db: DB;
     private readonly insertStmt: Statement;
     private readonly selectByIdStmt: Statement;
 
     constructor(db: DB) {
+        this.db = db;
         this.insertStmt = db.prepare(`
             INSERT INTO tickets (id, subject, body, status, attempts, created_at, updated_at)
             VALUES (@id, @subject, @body, 'pending', 0, @now, @now)
@@ -42,6 +54,38 @@ export class TicketsRepo {
     findById(id: string): Ticket | undefined {
         const row = this.selectByIdStmt.get(id) as TicketRow | undefined;
         return row === undefined ? undefined : this.rowToTicket(row);
+    }
+
+    list(filters: ListFilters, limit: number, after?: Keyset): Ticket[] {
+        const where: string[] = [];
+        const params: Record<string, string | number> = { limit };
+
+        if (filters.category !== undefined) {
+            where.push('category = @category');
+            params.category = filters.category;
+        }
+        if (filters.priority !== undefined) {
+            where.push('priority = @priority');
+            params.priority = filters.priority;
+        }
+        if (after !== undefined) {
+            where.push(
+                '(created_at < @afterCreatedAt OR (created_at = @afterCreatedAt AND id < @afterId))',
+            );
+            params.afterCreatedAt = after.createdAt;
+            params.afterId = after.id;
+        }
+
+        const sql = [
+            'SELECT * FROM tickets',
+            where.length > 0 ? `WHERE ${where.join(' AND ')}` : '',
+            'ORDER BY created_at DESC, id DESC LIMIT @limit',
+        ]
+            .filter((part) => part !== '')
+            .join(' ');
+
+        const rows = this.db.prepare(sql).all(params) as TicketRow[];
+        return rows.map((row) => this.rowToTicket(row));
     }
 
     private rowToTicket(row: TicketRow): Ticket {

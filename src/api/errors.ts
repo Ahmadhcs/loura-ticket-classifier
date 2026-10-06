@@ -6,6 +6,8 @@ export class NotFoundError extends Error {}
 
 export class ConflictError extends Error {}
 
+export class InvalidCursorError extends Error {}
+
 function parserErrorType(err: unknown): string | undefined {
     if (err instanceof Error && 'type' in err && typeof err.type === 'string') {
         return err.type;
@@ -33,6 +35,10 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
         return;
     }
 
+    if (err instanceof InvalidCursorError) {
+        send(res, 400, 'invalid_cursor', err.message);
+        return;
+    }
     if (err instanceof NotFoundError) {
         send(res, 404, 'not_found', err.message);
         return;

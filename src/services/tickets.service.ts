@@ -1,6 +1,28 @@
+import { z } from 'zod';
 import type { NewTicket, Ticket } from '../domain.js';
-import type { TicketsRepo } from '../repository/tickets.repo.js';
-import { ConflictError, NotFoundError } from '../api/errors.js';
+import type { Keyset, TicketsRepo } from '../repository/tickets.repo.js';
+import { ConflictError, InvalidCursorError, NotFoundError } from '../api/errors.js';
+import type { ListTicketsQuery } from '../api/schemas.js';
+
+const Cursor = z
+    .object({
+        createdAt: z.number().int(),
+        id: z.string(),
+    })
+    .strict();
+
+function decodeCursor(cursor: string): Keyset {
+    try {
+        return Cursor.parse(JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')));
+    } catch {
+        throw new InvalidCursorError('cursor is malformed');
+    }
+}
+
+function encodeCursor(last: Ticket): string {
+    const json = JSON.stringify({ createdAt: Date.parse(last.createdAt), id: last.id });
+    return Buffer.from(json, 'utf8').toString('base64url');
+}
 
 export class TicketsService {
     constructor(
@@ -22,5 +44,19 @@ export class TicketsService {
             throw new NotFoundError(`ticket ${id} not found`);
         }
         return ticket;
+    }
+
+    list(query: ListTicketsQuery): { items: Ticket[]; nextCursor: string | null } {
+        const after = query.cursor === undefined ? undefined : decodeCursor(query.cursor);
+        const rows = this.repo.list(
+            { category: query.category, priority: query.priority },
+            query.limit + 1,
+            after,
+        );
+        const items = rows.slice(0, query.limit);
+        const last = items[items.length - 1];
+        const nextCursor =
+            rows.length > items.length && last !== undefined ? encodeCursor(last) : null;
+        return { items, nextCursor };
     }
 }
