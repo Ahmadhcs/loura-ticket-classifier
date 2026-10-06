@@ -19,3 +19,11 @@ src/repository/ (all SQL lives here), src/llm/, src/worker.ts, src/logger.ts
 - Never store unvalidated model output.
 - Only add what I ask for in the current step.
 - Do not run git commands; I commit myself.
+
+## Conventions
+- The repository returns domain types (Ticket), never raw rows.
+- Tests use a real in-memory SQLite DB (openDb(":memory:")), not mocks.
+- HTTP concerns (status codes, error format) live in src/api only;
+  services and repository throw or return, they never know about HTTP.
+- Design decisions are in README.md; follow them, don't redesign.
+- Work one step at a time; don't build ahead of what I ask for.
