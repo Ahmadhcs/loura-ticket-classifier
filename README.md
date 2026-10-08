@@ -140,16 +140,30 @@ Plugging in a real provider means writing one class that implements LLMClient: s
 
 ## Testing
 
+83 tests with Vitest and supertest, run with `npm test`. No mocked repository anywhere: every test runs against a real SQLite database (in-memory, except one test that uses a temp file to prove two separate connections can't claim the same ticket). What's fake is time and the model: the clock, the sleep function, and the LLM are all injected, so tests are deterministic and fast, no test ever actually waits out a backoff.
+
+I tested what would hurt if it silently broke:
+
+- The lifecycle: idempotent inserts, atomic claims, lease expiry and recovery, and the fencing token, there's a test where a worker loses its lease, the ticket gets re-claimed, and the original worker's write is rejected.
+- The model boundary: table-driven tests over parsing, valid JSON in prose and code fences, braces and escaped quotes inside strings, out-of-set values, missing and extra fields, oversized summaries. Including one test that documents a known limitation on purpose (a brace-balanced non-JSON blob before the real JSON fails as invalid JSON instead of being skipped).
+- The retry policy: success on attempt 3, failure with the last reason stored, timeouts via real aborts, backoff durations between attempts and never after the last one.
+- The worker: never exceeds its concurrency cap, survives a crashing classification, stop() waits for in-flight work, and an end-to-end run over the 10 sample tickets, once with a clean model (all 10 classified) and once at 30% failure rate (everything still ends classified or failed, nothing stuck).
+- Injection: t-1005 is flagged and no other sample ticket is, and the obeyInjection test proves a well-formed wrong answer passes validation and gets stored, which is exactly why the flag exists.
 
 ---
 
 ## What changed from the plan
 
+- The lifecycle gained a fourth status. The brief says pending -> classified | failed, but answering the restart question properly needed to know which tickets were mid-flight, so processing (plus the lease) was added early and everything else grew around it.
+- markFailed originally only wrote the error. While building the list filters I realised a re-classified-then-failed ticket would keep stale category/priority values and still show up in filtered lists, so markFailed now clears all three classification columns, with a test pinning that.
+- The prompt tests caught a real bug before any model saw it: my instructions paragraph mentioned `<ticket>` literally in the prose, which meant the "delimiters appear exactly twice" invariant failed. The wording changed, not the tests.
+- The duplicate-id behaviour sharpened during the API step: the plan was just "no duplicates", the implementation distinguishes identical resend (200, a normal client retry) from same id with different content (409, probably a client bug).
 
 ---
 
 ## What I'd do with more time
 
--  
+- Re-classify failed or outdated tickets (the first suggestion in the brief). The plumbing already anticipates it: every prompt has a PROMPT_VERSION, markFailed clears stale classification columns, and recovery already proves tickets can safely re-enter the queue. I'd store prompt_version on each classified row, then add an endpoint like `POST /tickets/:id/reclassify` (and a bulk variant for "everything failed" or "everything classified before v2") that atomically resets matching tickets to pending with attempts back to 0. The worker needs no changes at all, requeued tickets just flow through the same claim/classify path.
+- Load test it across multiple processes. I'd want to see what happens with thousands of tickets arriving at once and several Node instances running workers against the same database. The atomic claim should hold up correctness wise, no two workers can take the same ticket, but I'd expect SQLite's single writer lock to become the bottleneck, and I'd like to measure where that point actually is rather than guess. That experiment is also what would tell me when the move to Postgres (SELECT ... FOR UPDATE SKIP LOCKED, same design, different engine) stops being optional.
 
 ---
